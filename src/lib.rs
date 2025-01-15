@@ -1,6 +1,6 @@
 use extism_pdk::*;
 use logic_based_learning_paths::domain_without_loading::{
-    BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload, ParamsSchema, SystemTimePayload, FileWriteOperationPayload
+    BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload, DummyPayload, FileWriteOperationPayload, ParamsSchema, SystemTimePayload
 };
 use std::collections::{HashSet,HashMap};
 use serde_json;
@@ -13,7 +13,7 @@ extern "ExtismHost" {
     // can't use multiple String args here!
     fn write_text_file(payload: FileWriteOperationPayload) -> ();
     // something to get folder structure for the cluster, including nested dirs and filenames
-    fn get_cluster_structure() -> DirectoryStructurePayload;
+    fn get_cluster_structure(payload: DummyPayload) -> DirectoryStructurePayload;
 }
 
 #[plugin_fn]
@@ -32,12 +32,12 @@ pub fn get_params_schema(_: ()) -> FnResult<ParamsSchema> {
 #[plugin_fn]
 pub fn process_cluster(_cpp: ClusterProcessingPayload) -> FnResult<ClusterProcessingResult> {
     let artifacts = HashSet::new();
-    // let DirectoryStructurePayload { entries } = (unsafe { get_cluster_structure() }).expect("Thought this would be fine.");
-    // let payload = FileWriteOperationPayload  { 
-    //     relative_path: "md_rendering_test".into(),
-    //     contents: format!("{entries:#?}")
-    // };
-    // let write_result = unsafe { write_text_file(payload) }?;
+    let DirectoryStructurePayload { entries } = (unsafe { get_cluster_structure(DummyPayload {}) }).expect("Thought this would be fine.");
+    let payload = FileWriteOperationPayload  { 
+        relative_path: "md_rendering_test".into(),
+        contents: format!("{entries:#?}")
+    };
+    let write_result = unsafe { write_text_file(payload) }?;
     // should include mapping for converted files iff this plugin is meant as "terminator"
     // i.e. if further processing of HTML is expected, don't include
     Ok(ClusterProcessingResult {
