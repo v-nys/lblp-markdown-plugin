@@ -1,16 +1,17 @@
 use extism_pdk::*;
 use logic_based_learning_paths::domain_without_loading::{
-    BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload, ParamsSchema, SystemTimePayload
+    BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload, ParamsSchema, SystemTimePayload, FileWriteOperationPayload
 };
 use std::collections::{HashSet,HashMap};
 use serde_json;
 
 #[host_fn]
 extern "ExtismHost" {
-    fn file_exists(relative_path: String) -> BoolPayload;
+    // fn file_exists(relative_path: String) -> BoolPayload;
     fn get_system_time() -> SystemTimePayload;
     fn get_last_modification_time(relative_path: String) -> SystemTimePayload;
-    fn write_text_file(relative_path: String, contents: String) -> ();
+    // can't use multiple String args here!
+    fn write_text_file(payload: FileWriteOperationPayload) -> ();
     // something to get folder structure for the cluster, including nested dirs and filenames
     fn get_cluster_structure() -> DirectoryStructurePayload;
 }
@@ -31,8 +32,12 @@ pub fn get_params_schema(_: ()) -> FnResult<ParamsSchema> {
 #[plugin_fn]
 pub fn process_cluster(_cpp: ClusterProcessingPayload) -> FnResult<ClusterProcessingResult> {
     let artifacts = HashSet::new();
-    let DirectoryStructurePayload { entries } = (unsafe { get_cluster_structure() }).expect("Thought this would be fine.");
-    let write_result = unsafe { write_text_file("md_rendering_test".into(), format!("{entries:#?}")) }?;
+    // let DirectoryStructurePayload { entries } = (unsafe { get_cluster_structure() }).expect("Thought this would be fine.");
+    // let payload = FileWriteOperationPayload  { 
+    //     relative_path: "md_rendering_test".into(),
+    //     contents: format!("{entries:#?}")
+    // };
+    // let write_result = unsafe { write_text_file(payload) }?;
     // should include mapping for converted files iff this plugin is meant as "terminator"
     // i.e. if further processing of HTML is expected, don't include
     Ok(ClusterProcessingResult {
