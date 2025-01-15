@@ -4,8 +4,9 @@ use comrak::{nodes::NodeValue, parse_document, Arena, ComrakOptions};
 use extism_pdk::*;
 use logic_based_learning_paths::domain_without_loading::{
     BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload,
-    DummyPayload, FileEntry, FileWriteOperationPayload, ParamsSchema, SystemTimePayload,
-    FileReadOperationInPayload, FileReadOperationOutPayload
+    DummyPayload, FileEntry, FileReadBase64OperationInPayload, FileReadBase64OperationOutPayload,
+    FileReadOperationInPayload, FileReadOperationOutPayload, FileWriteOperationPayload,
+    ParamsSchema, SystemTimePayload,
 };
 use regex::Regex;
 use scraper::{ElementRef, Html, Node};
@@ -21,6 +22,9 @@ extern "ExtismHost" {
     fn get_last_modification_time(relative_path: String) -> SystemTimePayload;
     fn write_text_file(payload: FileWriteOperationPayload) -> ();
     fn read_text_file(payload: FileReadOperationInPayload) -> FileReadOperationOutPayload;
+    fn read_binary_file_base64(
+        payload: FileReadBase64OperationInPayload,
+    ) -> FileReadBase64OperationOutPayload;
     fn get_cluster_structure(payload: DummyPayload) -> DirectoryStructurePayload;
 }
 
@@ -61,14 +65,21 @@ pub fn process_cluster(cpp: ClusterProcessingPayload) -> FnResult<ClusterProcess
     let DirectoryStructurePayload { entries } =
         (unsafe { get_cluster_structure(DummyPayload {}) }).expect("Thought this would be fine.");
     entries.iter().for_each(|e| {
-        if !e.is_dir && e.name.ends_with(input_extension) {
+        let e_path = PathBuf::from_str(&e.relative_path)
+            .expect("This was originally a path, so should be able to convert back.");
+        if !e.is_dir && e.relative_path.ends_with(input_extension) {
+            // TODO only do this if the existing generated file is older than the source file
             let string_rep = read_markdown_to_html_with_inlined_images(
-                &PathBuf::from_str(&e.name).expect("Building a PathBuf from str should work here."),
+                &PathBuf::from_str(&e.relative_path)
+                    .expect("Building a PathBuf from str should work here."),
             );
-            dbg!(string_rep);
             let payload = FileWriteOperationPayload {
-                relative_path: format!("{}.{}", &e.name, &output_extension),
-                contents: format!("{entries:#?}"),
+                relative_path: e_path
+                    .with_extension(output_extension)
+                    .to_string_lossy()
+                    .to_string(),
+                // FIXME: don't expect
+                contents: string_rep.expect("Failed to convert Markdown."),
             };
             unsafe { write_text_file(payload) }.expect("Invoking this host method should be fine.");
         }
@@ -127,7 +138,6 @@ fn recurse(node: ego_tree::NodeRef<Node>, new_html: &mut String) {
 fn read_markdown_to_html_with_inlined_images(md_path: &PathBuf) -> anyhow::Result<String> {
     let protocol_re = regex::Regex::new(r#"[A-Za-z]+://.+"#)
         .expect("This regex has been tested. It won't fail to compile.");
-    // TODO: replace with host function call
     let FileReadOperationOutPayload { contents: markdown } = unsafe {
         read_text_file(FileReadOperationInPayload {
             relative_path: md_path.to_string_lossy().to_string(),
@@ -182,15 +192,12 @@ fn read_markdown_to_html_with_inlined_images(md_path: &PathBuf) -> anyhow::Resul
                                     img_path.to_string_lossy()
                                 ))?,
                             };
-                            // borrow checker can't tell
-                            // moving this value means that we do not have a relative svg
-                            // but clone is enough to satisfy it...
-                            // TODO: use host function here as well
-                            let mut file = std::fs::File::open(img_path.clone())?;
-                            let mut buf = Vec::new();
-                            file.read_to_end(&mut buf)?;
-                            let base64_img = encode(&buf);
-                            link.url = format!(r#"data:{};base64,{}"#, mime_type, base64_img)
+                            let FileReadBase64OperationOutPayload { contents: base64 } = unsafe {
+                                read_binary_file_base64(FileReadBase64OperationInPayload {
+                                    relative_path: img_path.to_string_lossy().to_string(),
+                                })
+                            }?;
+                            link.url = format!(r#"data:{};base64,{}"#, mime_type, base64)
                         }
                     }
                 }
@@ -205,7 +212,9 @@ fn read_markdown_to_html_with_inlined_images(md_path: &PathBuf) -> anyhow::Resul
                 scrubbed.push(child);
             });
             let mut to_be_replaced = node.data.borrow_mut();
-            let FileReadOperationOutPayload { contents: svg_contents } = unsafe {
+            let FileReadOperationOutPayload {
+                contents: svg_contents,
+            } = unsafe {
                 read_text_file(FileReadOperationInPayload {
                     relative_path: img_path.to_string_lossy().to_string(),
                 })
