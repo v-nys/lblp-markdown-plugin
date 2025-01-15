@@ -5,6 +5,7 @@ use extism_pdk::*;
 use logic_based_learning_paths::domain_without_loading::{
     BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload,
     DummyPayload, FileEntry, FileWriteOperationPayload, ParamsSchema, SystemTimePayload,
+    FileReadOperationInPayload, FileReadOperationOutPayload
 };
 use regex::Regex;
 use scraper::{ElementRef, Html, Node};
@@ -19,6 +20,7 @@ extern "ExtismHost" {
     fn get_system_time() -> SystemTimePayload;
     fn get_last_modification_time(relative_path: String) -> SystemTimePayload;
     fn write_text_file(payload: FileWriteOperationPayload) -> ();
+    fn read_text_file(payload: FileReadOperationInPayload) -> FileReadOperationOutPayload;
     fn get_cluster_structure(payload: DummyPayload) -> DirectoryStructurePayload;
 }
 
@@ -64,7 +66,6 @@ pub fn process_cluster(cpp: ClusterProcessingPayload) -> FnResult<ClusterProcess
                 &PathBuf::from_str(&e.name).expect("Building a PathBuf from str should work here."),
             );
             dbg!(string_rep);
-            // TODO: write
             let payload = FileWriteOperationPayload {
                 relative_path: format!("{}.{}", &e.name, &output_extension),
                 contents: format!("{entries:#?}"),
@@ -127,7 +128,11 @@ fn read_markdown_to_html_with_inlined_images(md_path: &PathBuf) -> anyhow::Resul
     let protocol_re = regex::Regex::new(r#"[A-Za-z]+://.+"#)
         .expect("This regex has been tested. It won't fail to compile.");
     // TODO: replace with host function call
-    let markdown = std::fs::read_to_string(md_path)?;
+    let FileReadOperationOutPayload { contents: markdown } = unsafe {
+        read_text_file(FileReadOperationInPayload {
+            relative_path: md_path.to_string_lossy().to_string(),
+        })
+    }?;
     let arena = Arena::new();
     let mut comrak_options = ComrakOptions::default();
     comrak_options.extension.table = true;
@@ -200,8 +205,11 @@ fn read_markdown_to_html_with_inlined_images(md_path: &PathBuf) -> anyhow::Resul
                 scrubbed.push(child);
             });
             let mut to_be_replaced = node.data.borrow_mut();
-            // TODO: also use host fn here
-            let svg_contents = std::fs::read_to_string(img_path)?;
+            let FileReadOperationOutPayload { contents: svg_contents } = unsafe {
+                read_text_file(FileReadOperationInPayload {
+                    relative_path: img_path.to_string_lossy().to_string(),
+                })
+            }?;
             let actual_svg_start = svg_contents
                 .find("<svg")
                 .ok_or(anyhow::anyhow!("Could not find svg tag in svg file."))?;
