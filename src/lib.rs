@@ -1,9 +1,10 @@
 use extism_pdk::*;
 use logic_based_learning_paths::domain_without_loading::{
-    BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload, DummyPayload, FileWriteOperationPayload, ParamsSchema, SystemTimePayload
+    BoolPayload, ClusterProcessingPayload, ClusterProcessingResult, DirectoryStructurePayload,
+    DummyPayload, FileWriteOperationPayload, ParamsSchema, SystemTimePayload,
 };
-use std::collections::{HashSet,HashMap};
 use serde_json;
+use std::collections::{HashMap, HashSet};
 
 #[host_fn]
 extern "ExtismHost" {
@@ -30,12 +31,25 @@ pub fn get_params_schema(_: ()) -> FnResult<ParamsSchema> {
 }
 
 #[plugin_fn]
-pub fn process_cluster(_cpp: ClusterProcessingPayload) -> FnResult<ClusterProcessingResult> {
+pub fn process_cluster(cpp: ClusterProcessingPayload) -> FnResult<ClusterProcessingResult> {
     let artifacts = HashSet::new();
-    let DirectoryStructurePayload { entries } = (unsafe { get_cluster_structure(DummyPayload {}) }).expect("Thought this would be fine.");
-    let payload = FileWriteOperationPayload  { 
-        relative_path: "md_rendering_test".into(),
-        contents: format!("{entries:#?}")
+    let input_extension = cpp
+        .parameter_values
+        .get("input_extension")
+        .expect("Missing expected argument for parameter input_extension.")
+        .as_str()
+        .expect("Should be a string, as specified by the schema.");
+    let output_extension = cpp
+        .parameter_values
+        .get("output_extension")
+        .expect("Missing expected argument for parameter input_extension.")
+        .as_str()
+        .expect("Should be a string, as specified by the schema.");
+    let DirectoryStructurePayload { entries } =
+        (unsafe { get_cluster_structure(DummyPayload {}) }).expect("Thought this would be fine.");
+    let payload = FileWriteOperationPayload {
+        relative_path: format!("md_rendering_test.{output_extension}"),
+        contents: format!("{entries:#?}"),
     };
     let write_result = unsafe { write_text_file(payload) }?;
     // should include mapping for converted files iff this plugin is meant as "terminator"
