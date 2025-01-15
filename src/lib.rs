@@ -8,12 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 #[host_fn]
 extern "ExtismHost" {
-    // fn file_exists(relative_path: String) -> BoolPayload;
     fn get_system_time() -> SystemTimePayload;
     fn get_last_modification_time(relative_path: String) -> SystemTimePayload;
-    // can't use multiple String args here!
     fn write_text_file(payload: FileWriteOperationPayload) -> ();
-    // something to get folder structure for the cluster, including nested dirs and filenames
     fn get_cluster_structure(payload: DummyPayload) -> DirectoryStructurePayload;
 }
 
@@ -45,6 +42,12 @@ pub fn process_cluster(cpp: ClusterProcessingPayload) -> FnResult<ClusterProcess
         .expect("Missing expected argument for parameter input_extension.")
         .as_str()
         .expect("Should be a string, as specified by the schema.");
+    let include_artifact_mapping = cpp
+        .parameter_values
+        .get("include_artifact_mapping")
+        .expect("Missing expected argument for parameter include_artifact_mapping.")
+        .as_bool()
+        .expect("Should be a bool, as specified by the schema.");
     let DirectoryStructurePayload { entries } =
         (unsafe { get_cluster_structure(DummyPayload {}) }).expect("Thought this would be fine.");
     let payload = FileWriteOperationPayload {
@@ -55,6 +58,10 @@ pub fn process_cluster(cpp: ClusterProcessingPayload) -> FnResult<ClusterProcess
     // should include mapping for converted files iff this plugin is meant as "terminator"
     // i.e. if further processing of HTML is expected, don't include
     Ok(ClusterProcessingResult {
-        hash_set: artifacts,
+        hash_set: if include_artifact_mapping {
+            artifacts
+        } else {
+            HashSet::new()
+        },
     })
 }
