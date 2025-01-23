@@ -1,5 +1,4 @@
 use anyhow;
-use base64::encode;
 use comrak::{nodes::NodeValue, parse_document, Arena, ComrakOptions};
 use extism_pdk::*;
 use logic_based_learning_paths::domain_without_loading::{
@@ -21,6 +20,7 @@ extern "ExtismHost" {
     fn get_system_time() -> SystemTimePayload;
     fn get_last_modification_time(relative_path: String) -> SystemTimePayload;
     fn write_text_file(payload: FileWriteOperationPayload) -> ();
+    fn file_exists(payload: String) -> BoolPayload;
     fn read_text_file(payload: FileReadOperationInPayload) -> FileReadOperationOutPayload;
     fn read_binary_file_base64(
         payload: FileReadBase64OperationInPayload,
@@ -64,28 +64,48 @@ pub fn process_cluster(cpp: ClusterProcessingPayload) -> FnResult<ClusterProcess
         .expect("Should be a bool, as specified by the schema.");
     let DirectoryStructurePayload { entries } =
         (unsafe { get_cluster_structure(DummyPayload {}) }).expect("Thought this would be fine.");
-    entries.iter().for_each(|e| {
-        let e_path = PathBuf::from_str(&e.relative_path)
-            .expect("This was originally a path, so should be able to convert back.");
-        if !e.is_dir && e.relative_path.ends_with(input_extension) {
-            // TODO only do this if the existing generated file is older than the source file
-            let string_rep = read_markdown_to_html_with_inlined_images(
-                &PathBuf::from_str(&e.relative_path)
-                    .expect("Building a PathBuf from str should work here."),
-            );
-            let payload = FileWriteOperationPayload {
-                relative_path: e_path
-                    .with_extension(output_extension)
-                    .to_string_lossy()
-                    .to_string(),
-                // FIXME: don't expect
-                contents: string_rep.expect("Failed to convert Markdown."),
-            };
-            unsafe { write_text_file(payload) }.expect("Invoking this host method should be fine.");
-        }
-    });
+    let results: anyhow::Result<Vec<()>> =
+        entries
+            .iter()
+            .map(|e| {
+                let e_path = PathBuf::from_str(&e.relative_path)
+                    .expect("This was originally a path, so should be able to convert back.");
+                if !e.is_dir && e.relative_path.ends_with(input_extension) {
+                    let input_modification_time =
+                        (unsafe { get_last_modification_time(e.relative_path.clone()) })?;
+                    let mut output_file_relative_path = e
+                .relative_path
+                .strip_suffix(input_extension)
+                .expect("Already established that the relative path ends with the input extension.")
+                .to_string();
+                    output_file_relative_path.push_str(output_extension);
+                    let output_file_exists = (unsafe { file_exists(output_file_relative_path.clone()) })?;
+                    if !output_file_exists.value
+                        || (unsafe { get_last_modification_time(output_file_relative_path) })?.value
+                            < input_modification_time.value
+                    {
+                        let string_rep = read_markdown_to_html_with_inlined_images(
+                            &PathBuf::from_str(&e.relative_path)
+                                .expect("Building a PathBuf from str should work here."),
+                        );
+                        let payload = FileWriteOperationPayload {
+                            relative_path: e_path
+                                .with_extension(output_extension)
+                                .to_string_lossy()
+                                .to_string(),
+                            // FIXME: don't expect
+                            contents: string_rep.expect("Failed to convert Markdown."),
+                        };
+                        unsafe { write_text_file(payload) }
+                            .expect("Invoking this host method should be fine.");
+                    }
+                }
+                Ok(())
+            })
+            .collect();
     // should include mapping for converted files iff this plugin is meant as "terminator"
     // i.e. if further processing of HTML is expected, don't include
+    let _ = results?;
     Ok(ClusterProcessingResult {
         hash_set: if include_artifact_mapping {
             artifacts
